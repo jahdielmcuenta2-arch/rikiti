@@ -14,7 +14,7 @@ Pensada para compartir con amigos: todos los datos se sincronizan **en tiempo re
 | Bundler | Vite 7 |
 | Estilos | Tailwind CSS 4 |
 | Iconos | Lucide React |
-| Backend/DB | Firebase Firestore |
+| Backend/DB | Firebase Firestore + Storage |
 | Hosting | Vercel |
 | Lenguaje | TypeScript |
 
@@ -64,12 +64,30 @@ const firebaseConfig = {
 14. Selecciona **modo de prueba** ("Start in test mode") → esto permite leer/escribir sin autenticación (perfecto para el prototipo)
 15. Elige una ubicación (la más cercana a ti) → **Habilitar**
 
-> ⚠️ **Importante**: El modo de prueba expira en 30 días. Cuando expire, ve a Firestore → Reglas y cambia la regla a:
+### Activar Firebase Storage (para imágenes):
+16. En el menú lateral de Firebase, ve a **Storage**
+17. Clic en **"Comenzar"** (o "Get started")
+18. Selecciona **modo de prueba** ("Start in test mode")
+19. Elige la misma ubicación que Firestore → **Listo**
+
+> ⚠️ **Importante**: El modo de prueba expira en 30 días. Cuando expire:
+> - **Firestore** → Reglas → cambia a:
 > ```
 > rules_version = '2';
 > service cloud.firestore {
 >   match /databases/{database}/documents {
 >     match /{document=**} {
+>       allow read, write: if true;
+>     }
+>   }
+> }
+> ```
+> - **Storage** → Reglas → cambia a:
+> ```
+> rules_version = '2';
+> service firebase.storage {
+>   match /b/{bucket}/o {
+>     match /{allPaths=**} {
 >       allow read, write: if true;
 >     }
 >   }
@@ -244,7 +262,7 @@ studymate/
 │   │   ├── serverConfig.ts   # Constantes de la app
 │   │   └── subjects.ts       # Lista centralizada de materias
 │   ├── api/
-│   │   └── client.ts         # Cliente de datos (Firestore / localStorage)
+│   │   └── client.ts         # Cliente de datos (Firestore + Storage / localStorage)
 │   └── utils/
 │       └── cn.ts             # Utilidad para clases CSS
 ```
@@ -282,8 +300,10 @@ studymate/
 - Todos los usuarios comparten el mismo documento de Firestore automáticamente.
 
 ### "Las imágenes no se guardan en Firebase"
-- Las imágenes se almacenan como base64 dentro del documento de Firestore. Si son muy grandes pueden superar el límite de 1MB por documento.
-- **Solución:** usa imágenes pequeñas o comprimidas (menos de 200KB cada una).
+- Las imágenes se suben a **Firebase Storage** (no se guardan dentro de Firestore).
+- Verifica que hayas **activado Firebase Storage** en la consola de Firebase (ver Paso 1).
+- Si Storage no está activado, las imágenes se guardarán en base64 en localStorage (solo en tu navegador).
+- Revisa las **reglas de Storage** (deben permitir lectura/escritura).
 
 ### "No me aparecen las materias nuevas"
 - Si ya tenías datos guardados en localStorage, las materias antiguas pueden persistir.
