@@ -26,6 +26,8 @@ import {
   Moon,
   Cloud,
   HardDrive,
+  ArrowLeft,
+  Shield,
 } from 'lucide-react';
 
 // ==================== CONFIG & API CENTRALIZADOS ====================
@@ -51,12 +53,21 @@ import {
   type Flashcard,
 } from './api/client';
 
+// ==================== UTILIDADES DE FECHA ====================
+import {
+  parseDateLocal,
+  formatDateLocal,
+  getDaysUntil,
+  getDateLabel,
+  getDateLabelColor,
+} from './utils/dateUtils';
+
+// ==================== PIN DE SEGURIDAD ====================
+import { useSecurityPin } from './hooks/useSecurityPin';
+
 // ==================== CONSTANTES DE UI ====================
 
-// Clase base para TODOS los botones — animación suave al hacer hover/clic
 const BTN = 'transition-all duration-200 ease-out hover:scale-105 active:scale-95 focus:outline-none';
-
-// Clases para iconos clicables (papelera, cerrar, etc.)
 const ICON_BTN = 'transition-all duration-200 ease-out hover:scale-110 active:scale-90 focus:outline-none';
 
 const taskCategories = [
@@ -88,7 +99,6 @@ const folderColors = [
   'from-indigo-400 to-indigo-600'
 ];
 
-// Alias de tipos para evitar conflictos con Event del DOM
 type _Task = Task;
 type _Event = AppEvent;
 type _ScheduleItem = ScheduleItem;
@@ -99,6 +109,7 @@ type _Flashcard = Flashcard;
 // ==================== COMPONENTE PRINCIPAL ====================
 export default function App() {
   const [activeTab, setActiveTab] = useState('home');
+  const [previousTab, setPreviousTab] = useState<string | null>(null);
   const [data, setData] = useState<AppData>(defaultData);
   const [isOnline, setIsOnline] = useState(true);
   const [darkMode, setDarkMode] = useState(false);
@@ -133,6 +144,29 @@ export default function App() {
   const [currentCardIndex, setCurrentCardIndex] = useState(0);
   const [showAnswer, setShowAnswer] = useState(false);
 
+  // Upload
+  const [uploading, setUploading] = useState(false);
+
+  // ==================== PIN DE SEGURIDAD ====================
+  const { PinModal, runProtectedAction, isPinConfigured } = useSecurityPin({ darkMode });
+
+  // ==================== NAVEGACIÓN CON HISTORIAL ====================
+  const navigateTo = (tab: string) => {
+    setPreviousTab(activeTab);
+    setActiveTab(tab);
+  };
+
+  const goBack = () => {
+    if (previousTab) {
+      setActiveTab(previousTab);
+      setPreviousTab(null);
+    } else {
+      setActiveTab('home');
+    }
+  };
+
+  const isSubPage = activeTab === 'pomodoro' || activeTab === 'flashcards';
+
   // ==================== TEMA OSCURO ====================
   useEffect(() => {
     const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
@@ -148,8 +182,6 @@ export default function App() {
   };
 
   // ==================== PERSISTENCIA Y SINCRONIZACIÓN ====================
-
-  // Carga inicial (una sola vez)
   const fetchData = useCallback(async () => {
     const loaded = await loadAppData();
     setData(prev => {
@@ -164,10 +196,8 @@ export default function App() {
     fetchData();
   }, [fetchData]);
 
-  // Suscripción en TIEMPO REAL (Firebase onSnapshot) o polling (localStorage)
   useEffect(() => {
     if (USE_CLOUD) {
-      // Firebase: escuchar cambios en tiempo real
       const unsubscribe = subscribeToData((newData) => {
         setData(prev => {
           if (JSON.stringify(prev) !== JSON.stringify(newData)) {
@@ -178,7 +208,6 @@ export default function App() {
       });
       return () => unsubscribe();
     } else {
-      // Modo local: polling cada SYNC_INTERVAL ms
       const interval = setInterval(fetchData, SYNC_INTERVAL);
       return () => clearInterval(interval);
     }
@@ -218,20 +247,23 @@ export default function App() {
     return () => clearInterval(interval);
   }, [pomodoroRunning, pomodoroTime, pomodoroMode]);
 
-  // ==================== FUNCIONES CRUD ====================
+  // ==================== FUNCIONES CRUD (PROTEGIDAS CON PIN) ====================
+
   const addTask = () => {
     if (!newTask.text.trim()) return;
-    const task: _Task = {
-      id: Date.now().toString(),
-      text: newTask.text,
-      completed: false,
-      category: newTask.category,
-      subject: newTask.subject,
-      dueDate: newTask.dueDate
-    };
-    persistData({ ...data, tasks: [...data.tasks, task] });
-    setNewTask({ text: '', category: 'Tarea', subject: '', dueDate: '' });
-    setShowTaskModal(false);
+    runProtectedAction(() => {
+      const task: _Task = {
+        id: Date.now().toString(),
+        text: newTask.text,
+        completed: false,
+        category: newTask.category,
+        subject: newTask.subject,
+        dueDate: newTask.dueDate
+      };
+      persistData({ ...data, tasks: [...data.tasks, task] });
+      setNewTask({ text: '', category: 'Tarea', subject: '', dueDate: '' });
+      setShowTaskModal(false);
+    });
   };
 
   const toggleTask = (id: string) => {
@@ -239,62 +271,75 @@ export default function App() {
     persistData({ ...data, tasks });
   };
 
-  const deleteTask = (id: string) => {
-    persistData({ ...data, tasks: data.tasks.filter(t => t.id !== id) });
+  const handleDeleteTask = (id: string) => {
+    runProtectedAction(() => {
+      persistData({ ...data, tasks: data.tasks.filter(t => t.id !== id) });
+    });
   };
 
   const addEvent = () => {
     if (!newEvent.title.trim() || !newEvent.date) return;
-    const event: _Event = {
-      id: Date.now().toString(),
-      ...newEvent
-    };
-    persistData({ ...data, events: [...data.events, event] });
-    setNewEvent({ title: '', date: '', type: 'Examen', subject: '' });
-    setShowEventModal(false);
+    runProtectedAction(() => {
+      const event: _Event = {
+        id: Date.now().toString(),
+        ...newEvent
+      };
+      persistData({ ...data, events: [...data.events, event] });
+      setNewEvent({ title: '', date: '', type: 'Examen', subject: '' });
+      setShowEventModal(false);
+    });
   };
 
-  const deleteEvent = (id: string) => {
-    persistData({ ...data, events: data.events.filter(e => e.id !== id) });
+  const handleDeleteEvent = (id: string) => {
+    runProtectedAction(() => {
+      persistData({ ...data, events: data.events.filter(e => e.id !== id) });
+    });
   };
 
   const addClass = () => {
     if (!newClass.subject.trim()) return;
-    const classItem: _ScheduleItem = {
-      id: Date.now().toString(),
-      ...newClass
-    };
-    persistData({ ...data, schedule: [...data.schedule, classItem] });
-    setNewClass({ day: 'Lunes', subject: '', room: '', startTime: '08:00', endTime: '09:00' });
-    setShowAddClassModal(false);
+    runProtectedAction(() => {
+      const classItem: _ScheduleItem = {
+        id: Date.now().toString(),
+        ...newClass
+      };
+      persistData({ ...data, schedule: [...data.schedule, classItem] });
+      setNewClass({ day: 'Lunes', subject: '', room: '', startTime: '08:00', endTime: '09:00' });
+      setShowAddClassModal(false);
+    });
   };
 
-  const deleteClass = (id: string) => {
-    persistData({ ...data, schedule: data.schedule.filter(s => s.id !== id) });
+  const handleDeleteClass = (id: string) => {
+    runProtectedAction(() => {
+      persistData({ ...data, schedule: data.schedule.filter(s => s.id !== id) });
+    });
   };
 
   const addFolder = () => {
     if (!newFolder.trim()) return;
-    const folder: _Folder = {
-      id: Date.now().toString(),
-      name: newFolder,
-      color: folderColors[data.folders.length % folderColors.length],
-      files: []
-    };
-    persistData({ ...data, folders: [...data.folders, folder] });
-    setNewFolder('');
-    setShowFolderModal(false);
+    runProtectedAction(() => {
+      const folder: _Folder = {
+        id: Date.now().toString(),
+        name: newFolder,
+        color: folderColors[data.folders.length % folderColors.length],
+        files: []
+      };
+      persistData({ ...data, folders: [...data.folders, folder] });
+      setNewFolder('');
+      setShowFolderModal(false);
+    });
   };
 
-  const deleteFolder = async (id: string) => {
-    // Borrar todas las imágenes de la carpeta de Firebase Storage
-    const folder = data.folders.find(f => f.id === id);
-    if (folder) {
-      for (const file of folder.files) {
-        await deleteImage(file);
+  const handleDeleteFolder = (id: string) => {
+    runProtectedAction(async () => {
+      const folder = data.folders.find(f => f.id === id);
+      if (folder) {
+        for (const file of folder.files) {
+          await deleteImage(file);
+        }
       }
-    }
-    persistData({ ...data, folders: data.folders.filter(f => f.id !== id) });
+      persistData({ ...data, folders: data.folders.filter(f => f.id !== id) });
+    });
   };
 
   const addFileToFolder = (folderId: string, file: _FileItem) => {
@@ -304,30 +349,32 @@ export default function App() {
     persistData({ ...data, folders });
   };
 
-  const deleteFileFromFolder = async (folderId: string, fileId: string) => {
-    // Encontrar el archivo para borrar de Storage si aplica
-    const folder = data.folders.find(f => f.id === folderId);
-    const fileItem = folder?.files.find(f => f.id === fileId);
-    if (fileItem) {
-      await deleteImage(fileItem);
-    }
-    const folders = data.folders.map(f =>
-      f.id === folderId ? { ...f, files: f.files.filter(file => file.id !== fileId) } : f
-    );
-    persistData({ ...data, folders });
+  const handleDeleteFileFromFolder = (folderId: string, fileId: string) => {
+    runProtectedAction(async () => {
+      const folder = data.folders.find(f => f.id === folderId);
+      const fileItem = folder?.files.find(f => f.id === fileId);
+      if (fileItem) {
+        await deleteImage(fileItem);
+      }
+      const folders = data.folders.map(f =>
+        f.id === folderId ? { ...f, files: f.files.filter(file => file.id !== fileId) } : f
+      );
+      persistData({ ...data, folders });
+    });
   };
 
   const addGeneralFile = (file: _FileItem) => {
     persistData({ ...data, generalFiles: [...data.generalFiles, file] });
   };
 
-  const deleteGeneralFile = async (id: string) => {
-    // Encontrar el archivo para borrar de Storage si aplica
-    const fileItem = data.generalFiles.find(f => f.id === id);
-    if (fileItem) {
-      await deleteImage(fileItem);
-    }
-    persistData({ ...data, generalFiles: data.generalFiles.filter(f => f.id !== id) });
+  const handleDeleteGeneralFile = (id: string) => {
+    runProtectedAction(async () => {
+      const fileItem = data.generalFiles.find(f => f.id === id);
+      if (fileItem) {
+        await deleteImage(fileItem);
+      }
+      persistData({ ...data, generalFiles: data.generalFiles.filter(f => f.id !== id) });
+    });
   };
 
   const addFlashcard = () => {
@@ -360,29 +407,26 @@ export default function App() {
     persistData({ ...data, subjects: data.subjects.filter(s => s !== subject) });
   };
 
-  const [uploading, setUploading] = useState(false);
-
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, folderId?: string) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setUploading(true);
-    try {
-      // uploadImage() sube a Firebase Storage si está configurado,
-      // o convierte a base64 si estamos en modo local.
-      const fileItem = await uploadImage(file, folderId);
-      if (folderId) {
-        addFileToFolder(folderId, fileItem);
-      } else {
-        addGeneralFile(fileItem);
+    runProtectedAction(async () => {
+      setUploading(true);
+      try {
+        const fileItem = await uploadImage(file, folderId);
+        if (folderId) {
+          addFileToFolder(folderId, fileItem);
+        } else {
+          addGeneralFile(fileItem);
+        }
+      } catch (err) {
+        console.error('[StudyMate] Error subiendo imagen:', err);
+      } finally {
+        setUploading(false);
+        e.target.value = '';
       }
-    } catch (err) {
-      console.error('[StudyMate] Error subiendo imagen:', err);
-    } finally {
-      setUploading(false);
-      // Limpiar el input para permitir subir el mismo archivo de nuevo
-      e.target.value = '';
-    }
+    });
   };
 
   // Utilidades
@@ -395,11 +439,6 @@ export default function App() {
     return data.schedule.filter(s => s.day === getDayName()).sort((a, b) => a.startTime.localeCompare(b.startTime));
   };
 
-  const getDaysUntil = (date: string) => {
-    const diff = new Date(date).getTime() - new Date().getTime();
-    return Math.ceil(diff / (1000 * 60 * 60 * 24));
-  };
-
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
@@ -410,7 +449,6 @@ export default function App() {
   const pendingTasks = data.tasks.filter(t => !t.completed);
   const progress = data.tasks.length > 0 ? (completedTasks / data.tasks.length) * 100 : 0;
 
-  // Clases dinámicas según el tema
   const theme = {
     bg: darkMode ? 'bg-gray-900' : 'bg-gray-50',
     card: darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-100',
@@ -480,8 +518,9 @@ export default function App() {
           {(() => {
             const nextEvent = data.events
               .filter(e => getDaysUntil(e.date) >= 0)
-              .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
+              .sort((a, b) => parseDateLocal(a.date).getTime() - parseDateLocal(b.date).getTime())[0];
             if (!nextEvent) return <p className={`text-sm ${theme.textMuted}`}>No hay eventos próximos</p>;
+            const label = getDateLabel(nextEvent.date);
             const daysLeft = getDaysUntil(nextEvent.date);
             return (
               <div className="flex items-center justify-between">
@@ -490,7 +529,7 @@ export default function App() {
                   <p className={`text-sm ${theme.textSecondary}`}>{nextEvent.subject}</p>
                 </div>
                 <div className={`px-3 py-1 rounded-full text-sm font-medium ${daysLeft <= 3 ? 'bg-red-100 text-red-600' : 'bg-indigo-100 text-indigo-600'}`}>
-                  {daysLeft === 0 ? '¡Hoy!' : daysLeft === 1 ? 'Mañana' : `${daysLeft} días`}
+                  {label}
                 </div>
               </div>
             );
@@ -525,11 +564,11 @@ export default function App() {
 
       {/* Accesos rápidos */}
       <div className="grid grid-cols-2 gap-3">
-        <button onClick={() => setActiveTab('pomodoro')} className={`${BTN} rounded-xl p-4 text-center ${darkMode ? 'bg-red-900/30' : 'bg-red-50'} hover:shadow-md`}>
+        <button onClick={() => navigateTo('pomodoro')} className={`${BTN} rounded-xl p-4 text-center ${darkMode ? 'bg-red-900/30' : 'bg-red-50'} hover:shadow-md`}>
           <Timer className="mx-auto text-red-500 mb-1" size={24} />
           <span className={`text-xs ${theme.textSecondary}`}>Pomodoro</span>
         </button>
-        <button onClick={() => setActiveTab('flashcards')} className={`${BTN} rounded-xl p-4 text-center ${darkMode ? 'bg-purple-900/30' : 'bg-purple-50'} hover:shadow-md`}>
+        <button onClick={() => navigateTo('flashcards')} className={`${BTN} rounded-xl p-4 text-center ${darkMode ? 'bg-purple-900/30' : 'bg-purple-50'} hover:shadow-md`}>
           <Layers className="mx-auto text-purple-500 mb-1" size={24} />
           <span className={`text-xs ${theme.textSecondary}`}>Flashcards</span>
         </button>
@@ -556,7 +595,7 @@ export default function App() {
         )}
       </div>
 
-      {/* Badge de estado de Firebase */}
+      {/* Badge de estado */}
       <div className={`rounded-xl p-3 flex items-center gap-3 ${darkMode ? 'bg-gray-800' : 'bg-gray-100'}`}>
         <Users className={`${USE_CLOUD ? 'text-green-500' : 'text-gray-400'}`} size={20} />
         <div className={`text-xs ${theme.textSecondary}`}>
@@ -595,28 +634,41 @@ export default function App() {
       {/* Lista de tareas */}
       {data.tasks.length > 0 ? (
         <div className="space-y-2">
-          {data.tasks.map(task => (
-            <div key={task.id} className={`rounded-xl p-4 shadow-sm border transition-all duration-300 hover:shadow-md ${task.completed ? (darkMode ? 'border-green-800 bg-green-900/20' : 'border-green-200 bg-green-50') : theme.card}`}>
-              <div className="flex items-start gap-3">
-                <button onClick={() => toggleTask(task.id)} className={`${ICON_BTN} mt-1 w-5 h-5 rounded-full border-2 flex items-center justify-center ${task.completed ? 'bg-green-500 border-green-500' : (darkMode ? 'border-gray-500 hover:border-green-400' : 'border-gray-300 hover:border-green-500')}`}>
-                  {task.completed && <span className="text-white text-xs">✓</span>}
-                </button>
-                <div className="flex-1">
-                  <p className={`font-medium ${task.completed ? 'line-through text-gray-400' : theme.text}`}>{task.text}</p>
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    <span className={`px-2 py-0.5 text-xs rounded-full border ${darkMode ? categoryColors[task.category]?.dark : categoryColors[task.category]?.light || 'bg-gray-100 text-gray-600'}`}>
-                      {task.category}
-                    </span>
-                    {task.subject && <span className={`px-2 py-0.5 text-xs rounded-full ${darkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-100 text-gray-600'}`}>{task.subject}</span>}
-                    {task.dueDate && <span className={`text-xs ${theme.textMuted}`}>{new Date(task.dueDate).toLocaleDateString('es-ES')}</span>}
+          {data.tasks.map(task => {
+            const dateLabel = task.dueDate ? getDateLabel(task.dueDate) : '';
+            const dateLabelColor = task.dueDate ? getDateLabelColor(task.dueDate) : '';
+            return (
+              <div key={task.id} className={`rounded-xl p-4 shadow-sm border transition-all duration-300 hover:shadow-md ${task.completed ? (darkMode ? 'border-green-800 bg-green-900/20' : 'border-green-200 bg-green-50') : theme.card}`}>
+                <div className="flex items-start gap-3">
+                  <button onClick={() => toggleTask(task.id)} className={`${ICON_BTN} mt-1 w-5 h-5 rounded-full border-2 flex items-center justify-center ${task.completed ? 'bg-green-500 border-green-500' : (darkMode ? 'border-gray-500 hover:border-green-400' : 'border-gray-300 hover:border-green-500')}`}>
+                    {task.completed && <span className="text-white text-xs">✓</span>}
+                  </button>
+                  <div className="flex-1">
+                    <p className={`font-medium ${task.completed ? 'line-through text-gray-400' : theme.text}`}>{task.text}</p>
+                    <div className="flex flex-wrap gap-2 mt-2 items-center">
+                      <span className={`px-2 py-0.5 text-xs rounded-full border ${darkMode ? categoryColors[task.category]?.dark : categoryColors[task.category]?.light || 'bg-gray-100 text-gray-600'}`}>
+                        {task.category}
+                      </span>
+                      {task.subject && <span className={`px-2 py-0.5 text-xs rounded-full ${darkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-100 text-gray-600'}`}>{task.subject}</span>}
+                      {task.dueDate && (
+                        <span className={`text-xs ${theme.textMuted}`}>
+                          {formatDateLocal(task.dueDate)}
+                        </span>
+                      )}
+                      {dateLabel && !task.completed && (
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${dateLabelColor} ${darkMode ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+                          {dateLabel}
+                        </span>
+                      )}
+                    </div>
                   </div>
+                  <button onClick={() => handleDeleteTask(task.id)} className={`${ICON_BTN} text-red-400 hover:text-red-600 p-1`}>
+                    <Trash2 size={16} />
+                  </button>
                 </div>
-                <button onClick={() => deleteTask(task.id)} className={`${ICON_BTN} text-red-400 hover:text-red-600 p-1`}>
-                  <Trash2 size={16} />
-                </button>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <div className={`text-center py-8 ${theme.textMuted}`}>
@@ -657,7 +709,7 @@ export default function App() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button onClick={(e) => { e.stopPropagation(); deleteFolder(folder.id); }} className={`${ICON_BTN} text-red-400 p-1 hover:text-red-600`}>
+                  <button onClick={(e) => { e.stopPropagation(); handleDeleteFolder(folder.id); }} className={`${ICON_BTN} text-red-400 p-1 hover:text-red-600`}>
                     <Trash2 size={16} />
                   </button>
                   <ChevronRight size={20} className={`${theme.textMuted} transition-transform duration-300 ${expandedFolders.includes(folder.id) ? 'rotate-90' : ''}`} />
@@ -691,7 +743,7 @@ export default function App() {
                             onClick={() => { setSelectedImage(file.url); setShowImageModal(true); }}
                           />
                           <button
-                            onClick={() => deleteFileFromFolder(folder.id, file.id)}
+                            onClick={() => handleDeleteFileFromFolder(folder.id, file.id)}
                             className={`${ICON_BTN} absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100`}
                           >
                             <X size={12} />
@@ -737,7 +789,7 @@ export default function App() {
                   onClick={() => { setSelectedImage(file.url); setShowImageModal(true); }}
                 />
                 <button
-                  onClick={() => deleteGeneralFile(file.id)}
+                  onClick={() => handleDeleteGeneralFile(file.id)}
                   className={`${ICON_BTN} absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100`}
                 >
                   <X size={12} />
@@ -771,11 +823,13 @@ export default function App() {
       {data.events.length > 0 ? (
         <div className="space-y-3">
           {data.events
-            .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+            .sort((a, b) => parseDateLocal(a.date).getTime() - parseDateLocal(b.date).getTime())
             .map(event => {
               const daysLeft = getDaysUntil(event.date);
               const isPast = daysLeft < 0;
               const isUrgent = daysLeft >= 0 && daysLeft <= 3;
+              const label = getDateLabel(event.date);
+              const eventDate = parseDateLocal(event.date);
 
               return (
                 <div key={event.id} className={`rounded-xl p-4 shadow-sm border transition-all duration-300 hover:shadow-md ${isPast ? 'opacity-60' : ''} ${isUrgent && !isPast ? (darkMode ? 'border-red-800' : 'border-red-200') : theme.card}`}>
@@ -786,8 +840,8 @@ export default function App() {
                         event.type === 'Entrega' ? (darkMode ? 'bg-orange-900/50 text-orange-400' : 'bg-orange-100 text-orange-600') :
                         (darkMode ? 'bg-blue-900/50 text-blue-400' : 'bg-blue-100 text-blue-600')
                       }`}>
-                        <span className="text-lg font-bold">{new Date(event.date).getDate()}</span>
-                        <span className="text-xs">{new Date(event.date).toLocaleDateString('es-ES', { month: 'short' })}</span>
+                        <span className="text-lg font-bold">{eventDate.getDate()}</span>
+                        <span className="text-xs">{eventDate.toLocaleDateString('es-ES', { month: 'short' })}</span>
                       </div>
                       <div>
                         <p className={`font-medium ${theme.text}`}>{event.title}</p>
@@ -802,10 +856,15 @@ export default function App() {
                     <div className="flex items-center gap-2">
                       {!isPast && (
                         <div className={`px-3 py-1 rounded-full text-sm font-medium ${isUrgent ? 'bg-red-100 text-red-600' : 'bg-indigo-100 text-indigo-600'}`}>
-                          {daysLeft === 0 ? '¡Hoy!' : daysLeft === 1 ? 'Mañana' : `${daysLeft} días`}
+                          {label}
                         </div>
                       )}
-                      <button onClick={() => deleteEvent(event.id)} className={`${ICON_BTN} text-red-400 p-1 hover:text-red-600`}>
+                      {isPast && (
+                        <div className="px-3 py-1 rounded-full text-sm font-medium bg-gray-100 text-gray-500">
+                          {label}
+                        </div>
+                      )}
+                      <button onClick={() => handleDeleteEvent(event.id)} className={`${ICON_BTN} text-red-400 p-1 hover:text-red-600`}>
                         <Trash2 size={16} />
                       </button>
                     </div>
@@ -935,17 +994,31 @@ export default function App() {
       <div className={`max-w-md mx-auto min-h-screen pb-24 ${theme.bg}`}>
         {/* Header */}
         <div className={`px-4 py-3 flex justify-between items-center border-b sticky top-0 z-40 ${theme.header} transition-colors duration-300`}>
-          <h1 className="text-lg font-bold bg-gradient-to-r from-indigo-500 to-purple-500 bg-clip-text text-transparent">
-            StudyMate
-          </h1>
+          <div className="flex items-center gap-2">
+            {/* Botón retroceder — solo visible en subpáginas */}
+            {isSubPage && (
+              <button onClick={goBack} className={`${BTN} p-2 rounded-full ${darkMode ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-100 hover:bg-gray-200'}`}>
+                <ArrowLeft size={18} className={theme.text} />
+              </button>
+            )}
+            <h1 className="text-lg font-bold bg-gradient-to-r from-indigo-500 to-purple-500 bg-clip-text text-transparent">
+              StudyMate
+            </h1>
+          </div>
           <div className="flex gap-2">
+            {/* Indicador PIN activo */}
+            {isPinConfigured && (
+              <div className={`p-2 rounded-full ${darkMode ? 'bg-green-900/30' : 'bg-green-50'}`}>
+                <Shield size={18} className="text-green-500" />
+              </div>
+            )}
             <button onClick={toggleDarkMode} className={`${BTN} p-2 rounded-full ${darkMode ? 'bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
               {darkMode ? <Sun size={18} /> : <Moon size={18} />}
             </button>
-            <button onClick={() => setActiveTab('pomodoro')} className={`${BTN} p-2 rounded-full ${darkMode ? 'bg-red-900/30 text-red-400 hover:bg-red-900/50' : 'bg-red-50 text-red-500 hover:bg-red-100'}`}>
+            <button onClick={() => navigateTo('pomodoro')} className={`${BTN} p-2 rounded-full ${darkMode ? 'bg-red-900/30 text-red-400 hover:bg-red-900/50' : 'bg-red-50 text-red-500 hover:bg-red-100'}`}>
               <Timer size={18} />
             </button>
-            <button onClick={() => setActiveTab('flashcards')} className={`${BTN} p-2 rounded-full ${darkMode ? 'bg-purple-900/30 text-purple-400 hover:bg-purple-900/50' : 'bg-purple-50 text-purple-500 hover:bg-purple-100'}`}>
+            <button onClick={() => navigateTo('flashcards')} className={`${BTN} p-2 rounded-full ${darkMode ? 'bg-purple-900/30 text-purple-400 hover:bg-purple-900/50' : 'bg-purple-50 text-purple-500 hover:bg-purple-100'}`}>
               <Layers size={18} />
             </button>
           </div>
@@ -972,7 +1045,7 @@ export default function App() {
             ].map(tab => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => { setPreviousTab(null); setActiveTab(tab.id); }}
                 className={`${BTN} flex flex-col items-center py-2 px-4 rounded-xl ${
                   activeTab === tab.id
                     ? `text-indigo-500 ${darkMode ? 'bg-indigo-500/15' : 'bg-indigo-50'} shadow-sm`
@@ -1125,7 +1198,7 @@ export default function App() {
                         <p className={`text-xs ${theme.textMuted}`}>{item.startTime} - {item.endTime} • {item.room}</p>
                       </div>
                     </div>
-                    <button onClick={() => deleteClass(item.id)} className={`${ICON_BTN} text-red-400 p-1 hover:text-red-600`}>
+                    <button onClick={() => handleDeleteClass(item.id)} className={`${ICON_BTN} text-red-400 p-1 hover:text-red-600`}>
                       <Trash2 size={16} />
                     </button>
                   </div>
@@ -1314,6 +1387,9 @@ export default function App() {
           <img src={selectedImage} alt="Preview" className="max-w-full max-h-full object-contain rounded-lg" />
         </div>
       )}
+
+      {/* Modal del PIN de seguridad (renderizado desde el hook) */}
+      {PinModal}
     </div>
   );
 }
